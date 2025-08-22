@@ -1,6 +1,10 @@
 import streamlit as st
 import requests
 import pandas as pd
+import time
+
+# --- Streamlit page config ---
+st.set_page_config(page_title="Best Buy Product Explorer", layout="wide")
 
 # Load API key from Streamlit secrets
 API_KEY = st.secrets["BESTBUY_API_KEY"]
@@ -11,15 +15,13 @@ def fetch_products(query, mode="keyword", page=1, page_size=20):
     params = {
         "apiKey": API_KEY,
         "format": "json",
-        "show": "sku,name,regularPrice,salePrice,onlineAvailability",
+        "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,brand,categoryPath.name",
         "pageSize": page_size,
         "page": page
     }
 
     if mode == "keyword":
         url = f"{BASE_URL}/products((search={query}))"
-    elif mode == "sku":
-        url = f"{BASE_URL}/products(sku in({query}))"
     elif mode == "category":
         url = f"{BASE_URL}/products((categoryPath.id={query}))"
     else:
@@ -31,6 +33,33 @@ def fetch_products(query, mode="keyword", page=1, page_size=20):
     else:
         st.error(f"Error {response.status_code}: {response.text}")
         return []
+
+def fetch_sku_list(sku_list):
+    products = []
+    chunk_size = 100  # Best Buy API max
+    progress = st.progress(0, text="Fetching SKU data...")
+    total_chunks = (len(sku_list) - 1) // chunk_size + 1
+
+    for i in range(0, len(sku_list), chunk_size):
+        chunk = ",".join(sku_list[i:i+chunk_size])
+        url = f"{BASE_URL}/products(sku in({chunk}))"
+        params = {
+            "apiKey": API_KEY,
+            "format": "json",
+            "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,brand,categoryPath.name",
+            "pageSize": 100
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            products.extend(response.json().get("products", []))
+        else:
+            st.error(f"Error {response.status_code}: {response.text}")
+
+        progress.progress(min((i//chunk_size + 1) / total_chunks, 1.0), text=f"Fetching chunk {i//chunk_size + 1} of {total_chunks}")
+        time.sleep(0.1)
+
+    progress.empty()
+    return products
 
 def fetch_categories():
     url = f"{BASE_URL}/categories"
@@ -51,16 +80,25 @@ st.title("🛒 Best Buy Product Explorer")
 mode = st.radio("Choose Input Mode:", ["SKU List", "Keyword Search", "Category Browse"])
 
 if mode == "SKU List":
-    st.write("Upload CSV or paste SKUs (comma-separated):")
+    st.write("Upload CSV or paste SKUs (comma-separated or line-separated):")
     sku_input = st.text_area("Enter SKUs:")
     if st.button("Fetch SKU Details"):
         if sku_input:
             sku_list = sku_input.replace("\n", ",").split(",")
-            products = fetch_products(",".join(sku_list), mode="sku")
+            sku_list = [s.strip() for s in sku_list if s.strip()]
+            products = fetch_sku_list(sku_list)   # chunked fetch with progress
             if products:
                 df = pd.DataFrame(products)
-                st.dataframe(df)
+
+                # Flatten categoryPath.name into a single column
+                if "categoryPath" in df.columns:
+                    df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
+                    df.drop(columns=["categoryPath"], inplace=True)
+
+                st.dataframe(df, use_container_width=True)
                 st.download_button("Download CSV", df.to_csv(index=False), "sku_results.csv", "text/csv")
+            else:
+                st.warning("No products found.")
         else:
             st.warning("Please enter at least one SKU.")
 
@@ -68,10 +106,13 @@ elif mode == "Keyword Search":
     keyword = st.text_input("Enter keyword (e.g., laptop, TV, headphones):")
     if st.button("Search"):
         if keyword:
-            products = fetch_products(keyword, mode="keyword")
+            products = fetch_products(keyword, mode="keyword", page_size=50)
             if products:
                 df = pd.DataFrame(products)
-                st.dataframe(df)
+                if "categoryPath" in df.columns:
+                    df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
+                    df.drop(columns=["categoryPath"], inplace=True)
+                st.dataframe(df, use_container_width=True)
                 st.download_button("Download CSV", df.to_csv(index=False), "keyword_results.csv", "text/csv")
         else:
             st.warning("Please enter a keyword.")
@@ -83,8 +124,11 @@ elif mode == "Category Browse":
         category_name = st.selectbox("Choose a category:", list(category_map.keys()))
         if st.button("Browse Category"):
             category_id = category_map[category_name]
-            products = fetch_products(category_id, mode="category")
+            products = fetch_products(category_id, mode="category", page_size=50)
             if products:
                 df = pd.DataFrame(products)
-                st.dataframe(df)
+                if "categoryPath" in df.columns:
+                    df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
+                    df.drop(columns=["categoryPath"], inplace=True)
+                st.dataframe(df, use_container_width=True)
                 st.download_button("Download CSV", df.to_csv(index=False), "category_results.csv", "text/csv")
