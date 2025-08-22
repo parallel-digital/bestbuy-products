@@ -1,0 +1,6 @@
+[theme]
+primaryColor="#0f8b8d"          # Button & highlight color
+backgroundColor="#f5f7fa"       # Page background
+secondaryBackgroundColor="#ffffff"  # Card/sidebar background
+textColor="#143642"             # Default text
+font="inter"               # or "serif", "monospace"
