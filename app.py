@@ -155,6 +155,4 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-if st.button("Click Me"):
-    st.write("Button clicked!")
     
