@@ -133,3 +133,28 @@ elif mode == "Category Browse":
                     df.drop(columns=["categoryPath"], inplace=True)
                 st.dataframe(df, use_container_width=True)
                 st.download_button("Download CSV", df.to_csv(index=False), "category_results.csv", "text/csv")
+
+# Custom CSS
+st.markdown(
+    """
+    <style>
+    /* Normal button style */
+    div.stButton > button {
+        background-color: #0f8b8d;  /* main button color */
+        color: white;               /* text color */
+        border-radius: 8px;         /* rounded corners */
+        padding: 0.5em 1em;         /* padding */
+        font-size: 16px;            /* font size */
+    }
+    div.stButton > button:hover {
+        background-color: #f49f0a;  /* hover color */
+        color: white;               /* text color on hover */
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+if st.button("Click Me"):
+    st.write("Button clicked!")
+    
