@@ -159,8 +159,14 @@ st.markdown(
         font-size: 16px;
     }
     div.stDownloadButton > button:hover {
-        background-color: #f49f0;  /* hover color */
+        background-color: #f49f0a;  /* hover color */
         color: white;
+    }
+    /* Background color of dataframe cells */
+    div.stDataFrame div.row_heading, 
+    div.stDataFrame div.column_heading, 
+    div.stDataFrame div.dataframe td {
+        background-color: #f49f0a;  /* change to your desired color */
     }
     </style>
     """,
