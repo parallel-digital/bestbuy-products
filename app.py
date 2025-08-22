@@ -151,7 +151,7 @@ st.markdown(
         color: white;               /* text color on hover */
     }
 
-    div.stDownload_Button > button {
+    div.stdownload_button > button {
         background-color: #0f8b8d;  /* button color */
         color: white;               /* text color */
         border-radius: 8px;         /* rounded corners */
