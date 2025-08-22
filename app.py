@@ -151,14 +151,14 @@ st.markdown(
         color: white;               /* text color on hover */
     }
 
-    div.stdownload_button > button {
+    div.stDownloadButton > button {
         background-color: #0f8b8d;  /* button color */
         color: white;               /* text color */
         border-radius: 8px;         /* rounded corners */
         padding: 0.5em 1em;
         font-size: 16px;
     }
-    div.stDownload_Button > button:hover {
+    div.stDownloadButton > button:hover {
         background-color: #f49f0;  /* hover color */
         color: white;
     }
