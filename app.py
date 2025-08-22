@@ -163,10 +163,8 @@ st.markdown(
         color: white;
     }
     /* Background color of dataframe cells */
-    div.stDataFrame div.row_heading, 
-    div.stDataFrame div.column_heading, 
-    div.stDataFrame div.dataframe td {
-        background-color: #f49f0a;  /* change to your desired color */
+    div.stDataFrame > dataframe {
+        background-color: #ffffff;  /* change to your desired color */
     }
     </style>
     """,
