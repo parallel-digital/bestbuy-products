@@ -37,29 +37,30 @@ def fetch_products(query, mode="keyword", page=1, page_size=20):
 def fetch_sku_list(sku_list):
     products = []
     chunk_size = 100  # Best Buy API max
-    progress = st.progress(0, text="Fetching SKU data...")
-    total_chunks = (len(sku_list) - 1) // chunk_size + 1
-
     for i in range(0, len(sku_list), chunk_size):
         chunk = ",".join(sku_list[i:i+chunk_size])
         url = f"{BASE_URL}/products(sku in({chunk}))"
         params = {
             "apiKey": API_KEY,
             "format": "json",
-            "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,manufacturer,categoryPath.name",
+            "show": "sku,name,regularPrice,salePrice,onlineAvailability,categoryPath.name,modelNumber,manufacturer",
             "pageSize": 100
         }
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            products.extend(response.json().get("products", []))
-        else:
-            st.error(f"Error {response.status_code}: {response.text}")
-
-        progress.progress(min((i//chunk_size + 1) / total_chunks, 1.0), text=f"Fetching chunk {i//chunk_size + 1} of {total_chunks}")
-        time.sleep(0.1)
-
-    progress.empty()
+        retries = 3
+        for attempt in range(retries):
+            response = requests.get(url, params=params)
+            if response.status_code == 200:
+                products.extend(response.json().get("products", []))
+                break
+            elif response.status_code == 403:
+                st.warning("Rate limit hit. Retrying...")
+                time.sleep(1.5 * (attempt + 1))  # exponential backoff
+            else:
+                st.error(f"Error {response.status_code}: {response.text}")
+                break
+        time.sleep(0.3)  # prevent hitting per-second limit
     return products
+
 
 def fetch_categories():
     url = f"{BASE_URL}/categories"
