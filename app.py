@@ -163,7 +163,7 @@ st.markdown(
         padding: 0.5em 1em;
         font-size: 16px;
     }
-    div.stdownload_button > button:hover {
+    div.stDownload_Button > button:hover {
         background-color: #f49f0;  /* hover color */
         color: white;
     }
