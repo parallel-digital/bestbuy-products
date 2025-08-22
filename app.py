@@ -150,6 +150,12 @@ st.markdown(
         background-color: #f49f0a;  /* hover color */
         color: white;               /* text color on hover */
     }
+    /* Background color of dataframe cells */
+    div.stDataFrame div.row_heading, 
+    div.stDataFrame div.column_heading, 
+    div.stDataFrame div.dataframe td {
+        background-color: #ffffff;  /* change to your desired color */
+    }
     </style>
     """,
     unsafe_allow_html=True
