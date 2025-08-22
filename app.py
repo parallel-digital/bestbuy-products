@@ -46,7 +46,7 @@ def fetch_sku_list(sku_list):
             "show": "sku,name,regularPrice,salePrice,onlineAvailability,categoryPath.name,modelNumber,manufacturer",
             "pageSize": 100
         }
-        retries = 3
+        retries = 8
         for attempt in range(retries):
             response = requests.get(url, params=params)
             if response.status_code == 200:
@@ -76,7 +76,7 @@ def fetch_categories():
     return []
 
 # --- Streamlit UI ---
-st.title("🛒 Best Buy Product Explorer v1")
+st.title("🛒 Best Buy Product Explorer v1.1")
 
 mode = st.radio("Choose Input Mode:", ["SKU List", "Keyword Search", "Category Browse"])
 
