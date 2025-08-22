@@ -151,10 +151,21 @@ st.markdown(
         color: white;               /* text color on hover */
     }
     /* Background color of dataframe cells */
-    div.stDataFrame div.row_heading, 
-    div.stDataFrame div.column_heading, 
-    div.stDataFrame div.dataframe td {
+    div.stdataframe div.row_heading, 
+    div.stdataframe div.column_heading, 
+    div.stdataframe div.dataframe td {
         background-color: #ffffff;  /* change to your desired color */
+    }
+    div.stdownloadbutton > button {
+        background-color: #0f8b8d;  /* button color */
+        color: white;               /* text color */
+        border-radius: 8px;         /* rounded corners */
+        padding: 0.5em 1em;
+        font-size: 16px;
+    }
+    div.stdownloadbutton > button:hover {
+        background-color: #f49f0;  /* hover color */
+        color: white;
     }
     </style>
     """,
