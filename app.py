@@ -162,11 +162,11 @@ st.markdown(
         background-color: #f49f0a;  /* hover color */
         color: white;
     }
-    /* Background color of dataframe cells */
-    div.stDataFrame div.row_heading, 
-    div.stDataFrame div.column_heading, 
-    div.stDataFrame div.dataframe td {
-        background-color: #f0f4f8;  /* change to your desired color */
+    /* Background color of the table cells */
+    div[data-testid="stDataFrame"] div.row_heading,
+    div[data-testid="stDataFrame"] div.column_heading,
+    div[data-testid="stDataFrame"] div.dataframe td {
+        background-color: #ffffff !important;  /* your table background color */
     }
     </style>
     """,
