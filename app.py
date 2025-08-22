@@ -15,7 +15,7 @@ def fetch_products(query, mode="keyword", page=1, page_size=20):
     params = {
         "apiKey": API_KEY,
         "format": "json",
-        "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,brand,categoryPath.name",
+        "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,manufacturer,categoryPath.name",
         "pageSize": page_size,
         "page": page
     }
@@ -46,7 +46,7 @@ def fetch_sku_list(sku_list):
         params = {
             "apiKey": API_KEY,
             "format": "json",
-            "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,brand,categoryPath.name",
+            "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,manufacturer,categoryPath.name",
             "pageSize": 100
         }
         response = requests.get(url, params=params)
@@ -75,7 +75,7 @@ def fetch_categories():
     return []
 
 # --- Streamlit UI ---
-st.title("🛒 Best Buy Product Explorer")
+st.title("🛒 Best Buy Product Explorer v1")
 
 mode = st.radio("Choose Input Mode:", ["SKU List", "Keyword Search", "Category Browse"])
 
