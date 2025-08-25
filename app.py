@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
+import datetime
 
 # --- Streamlit page config ---
 st.set_page_config(page_title="Best Buy Product Explorer", layout="wide")
@@ -96,6 +97,9 @@ if mode == "SKU List":
                     df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
                     df.drop(columns=["categoryPath"], inplace=True)
 
+                # Add timestamp
+                df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
                 st.dataframe(df, use_container_width=True)
                 st.download_button("Download CSV", df.to_csv(index=False), "sku_results.csv", "text/csv")
             else:
