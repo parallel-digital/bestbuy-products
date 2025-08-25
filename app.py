@@ -63,6 +63,7 @@ def fetch_sku_list(sku_list):
     return products
 
 
+
 def fetch_categories():
     url = f"{BASE_URL}/categories"
     params = {
@@ -97,9 +98,13 @@ if mode == "SKU List":
                     df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
                     df.drop(columns=["categoryPath"], inplace=True)
 
-                # Add timestamp
-                df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
+                # ✅ Add timestamp column to results
+                if results:
+                    df = pd.DataFrame(products)
+                    df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    return df
+                return pd.DataFrame()
+
                 st.dataframe(df, use_container_width=True)
                 st.download_button("Download CSV", df.to_csv(index=False), "sku_results.csv", "text/csv")
             else:
