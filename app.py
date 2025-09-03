@@ -1,147 +1,148 @@
 import streamlit as st
 import requests
 import pandas as pd
-import time
 import datetime
+import time
 
-# --- Streamlit page config ---
-st.set_page_config(page_title="Best Buy Product Explorer", layout="wide")
-
-# Load API key from Streamlit secrets
+# Best Buy API Key (stored in Streamlit Secrets)
 API_KEY = st.secrets["BESTBUY_API_KEY"]
+
 BASE_URL = "https://api.bestbuy.com/v1"
 
-# --- Helper functions ---
-def fetch_products(query, mode="keyword", page=1, page_size=20):
-    params = {
-        "apiKey": API_KEY,
-        "format": "json",
-        "show": "sku,name,regularPrice,salePrice,onlineAvailability,modelNumber,manufacturer,categoryPath.name",
-        "pageSize": page_size,
-        "page": page
-    }
+# ------------------------
+# Helper functions
+# ------------------------
+def fetch_products_by_skus(skus):
+    results = []
+    progress_bar = st.progress(0)
 
-    if mode == "keyword":
-        url = f"{BASE_URL}/products((search={query}))"
-    elif mode == "category":
-        url = f"{BASE_URL}/products((categoryPath.id={query}))"
-    else:
-        return []
+    for i, sku in enumerate(skus):
+        url = f"{BASE_URL}/products(sku={sku})?apiKey={API_KEY}&format=json"
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            if "products" in data and len(data["products"]) > 0:
+                product = data["products"][0]
+                results.append({
+                    "sku": product.get("sku"),
+                    "name": product.get("name"),
+                    "modelNumber": product.get("modelNumber"),
+                    "brand": product.get("manufacturer"),
+                    "category": product.get("class", {}).get("name") if "class" in product else None,
+                    "regularPrice": product.get("regularPrice"),
+                    "salePrice": product.get("salePrice"),
+                    "url": product.get("url")
+                })
+        # update progress
+        progress_bar.progress((i + 1) / len(skus))
+        time.sleep(0.2)  # prevent rate limiting
 
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        return response.json().get("products", [])
-    else:
-        st.error(f"Error {response.status_code}: {response.text}")
-        return []
+    # ✅ Add timestamp column to results
+    if results:
+        df = pd.DataFrame(results)
+        df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return df
 
-def fetch_sku_list(sku_list):
-    products = []
-    chunk_size = 100  # Best Buy API max
-    for i in range(0, len(sku_list), chunk_size):
-        chunk = ",".join(sku_list[i:i+chunk_size])
-        url = f"{BASE_URL}/products(sku in({chunk}))"
-        params = {
-            "apiKey": API_KEY,
-            "format": "json",
-            "show": "sku,name,regularPrice,salePrice,onlineAvailability,categoryPath.name,modelNumber,manufacturer",
-            "pageSize": 100
-        }
-        retries = 8
-        for attempt in range(retries):
-            response = requests.get(url, params=params)
-            if response.status_code == 200:
-                products.extend(response.json().get("products", []))
-                break
-            elif response.status_code == 403:
-                st.warning("Rate limit hit. Retrying...")
-                time.sleep(1.5 * (attempt + 1))  # exponential backoff
-            else:
-                st.error(f"Error {response.status_code}: {response.text}")
-                break
-        time.sleep(0.3)  # prevent hitting per-second limit
-    return products
+    return pd.DataFrame()
 
 
+def fetch_products_by_keyword(keyword):
+    url = f"{BASE_URL}/products((search={keyword}))?apiKey={API_KEY}&format=json"
+    resp = requests.get(url)
+    results = []
 
-def fetch_categories():
-    url = f"{BASE_URL}/categories"
-    params = {
-        "apiKey": API_KEY,
-        "format": "json",
-        "show": "id,name",
-        "pageSize": 100
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        return response.json().get("categories", [])
-    return []
+    if resp.status_code == 200:
+        data = resp.json()
+        for product in data.get("products", []):
+            results.append({
+                "sku": product.get("sku"),
+                "name": product.get("name"),
+                "modelNumber": product.get("modelNumber"),
+                "brand": product.get("manufacturer"),
+                "category": product.get("class", {}).get("name") if "class" in product else None,
+                "regularPrice": product.get("regularPrice"),
+                "salePrice": product.get("salePrice"),
+                "url": product.get("url")
+            })
 
-# --- Streamlit UI ---
-st.title("🛒 Best Buy Product Explorer v1.1")
+    # ✅ Add timestamp
+    if results:
+        df = pd.DataFrame(results)
+        df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return df
 
-mode = st.radio("Choose Input Mode:", ["SKU List", "Keyword Search", "Category Browse"])
+    return pd.DataFrame()
 
-if mode == "SKU List":
-    st.write("Upload CSV or paste SKUs (comma-separated or line-separated):")
-    sku_input = st.text_area("Enter SKUs:")
-    if st.button("Fetch SKU Details"):
-        if sku_input:
-            sku_list = sku_input.replace("\n", ",").split(",")
-            sku_list = [s.strip() for s in sku_list if s.strip()]
-            products = fetch_sku_list(sku_list)   # chunked fetch with progress
-            if products:
-                df = pd.DataFrame(products)
 
-                # Flatten categoryPath.name into a single column
-                if "categoryPath" in df.columns:
-                    df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
-                    df.drop(columns=["categoryPath"], inplace=True)
+def fetch_products_by_category(category_id):
+    url = f"{BASE_URL}/products(categoryPath.id={category_id})?apiKey={API_KEY}&format=json"
+    resp = requests.get(url)
+    results = []
 
-                # ✅ Add timestamp column to results
-                if results:
-                    df = pd.DataFrame(products)
-                    df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    return df
-                return pd.DataFrame()
+    if resp.status_code == 200:
+        data = resp.json()
+        for product in data.get("products", []):
+            results.append({
+                "sku": product.get("sku"),
+                "name": product.get("name"),
+                "modelNumber": product.get("modelNumber"),
+                "brand": product.get("manufacturer"),
+                "category": product.get("class", {}).get("name") if "class" in product else None,
+                "regularPrice": product.get("regularPrice"),
+                "salePrice": product.get("salePrice"),
+                "url": product.get("url")
+            })
 
+    # ✅ Add timestamp
+    if results:
+        df = pd.DataFrame(results)
+        df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return df
+
+    return pd.DataFrame()
+
+
+# ------------------------
+# Streamlit UI
+# ------------------------
+st.title("Best Buy Product Explorer")
+
+option = st.sidebar.radio("Choose an input method:", ("SKU List", "Keyword Search", "Category Browse"))
+
+if option == "SKU List":
+    sku_input = st.text_area("Enter SKUs (comma-separated)")
+    if st.button("Fetch by SKUs"):
+        skus = [s.strip() for s in sku_input.split(",") if s.strip()]
+        if skus:
+            df = fetch_products_by_skus(skus)
+            if not df.empty:
                 st.dataframe(df, use_container_width=True)
-                st.download_button("Download CSV", df.to_csv(index=False), "sku_results.csv", "text/csv")
+                st.download_button("Download CSV", df.to_csv(index=False), "products.csv", "text/csv")
             else:
                 st.warning("No products found.")
-        else:
-            st.warning("Please enter at least one SKU.")
 
-elif mode == "Keyword Search":
-    keyword = st.text_input("Enter keyword (e.g., laptop, TV, headphones):")
+elif option == "Keyword Search":
+    keyword = st.text_input("Enter a keyword")
     if st.button("Search"):
         if keyword:
-            products = fetch_products(keyword, mode="keyword", page_size=50)
-            if products:
-                df = pd.DataFrame(products)
-                if "categoryPath" in df.columns:
-                    df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
-                    df.drop(columns=["categoryPath"], inplace=True)
+            df = fetch_products_by_keyword(keyword)
+            if not df.empty:
                 st.dataframe(df, use_container_width=True)
-                st.download_button("Download CSV", df.to_csv(index=False), "keyword_results.csv", "text/csv")
-        else:
-            st.warning("Please enter a keyword.")
+                st.download_button("Download CSV", df.to_csv(index=False), "products.csv", "text/csv")
+            else:
+                st.warning("No products found.")
 
-elif mode == "Category Browse":
-    categories = fetch_categories()
-    if categories:
-        category_map = {c["name"]: c["id"] for c in categories}
-        category_name = st.selectbox("Choose a category:", list(category_map.keys()))
-        if st.button("Browse Category"):
-            category_id = category_map[category_name]
-            products = fetch_products(category_id, mode="category", page_size=50)
-            if products:
-                df = pd.DataFrame(products)
-                if "categoryPath" in df.columns:
-                    df["categories"] = df["categoryPath"].apply(lambda x: " > ".join([c["name"] for c in x]) if isinstance(x, list) else "")
-                    df.drop(columns=["categoryPath"], inplace=True)
+elif option == "Category Browse":
+    category_id = st.text_input("Enter a category ID")
+    if st.button("Browse Category"):
+        if category_id:
+            df = fetch_products_by_category(category_id)
+            if not df.empty:
                 st.dataframe(df, use_container_width=True)
-                st.download_button("Download CSV", df.to_csv(index=False), "category_results.csv", "text/csv")
+                st.download_button("Download CSV", df.to_csv(index=False), "products.csv", "text/csv")
+            else:
+                st.warning("No products found.")
+
 
 # Custom CSS
 st.markdown(
