@@ -12,38 +12,27 @@ BASE_URL = "https://api.bestbuy.com/v1"
 # ------------------------
 # Helper functions
 # ------------------------
-def fetch_products_by_skus(skus):
-    results = []
-    progress_bar = st.progress(0)
-
-    for i, sku in enumerate(skus):
+def fetch_products_by_skus(sku_list):
+    all_products = []
+    for sku in sku_list:
         url = f"{BASE_URL}/products(sku={sku})?apiKey={API_KEY}&format=json"
         resp = requests.get(url)
         if resp.status_code == 200:
             data = resp.json()
-            if "products" in data and len(data["products"]) > 0:
-                product = data["products"][0]
-                results.append({
+            products = data.get("products", [])
+            for product in products:
+                all_products.append({
                     "sku": product.get("sku"),
                     "name": product.get("name"),
-                    "modelNumber": product.get("modelNumber"),
                     "brand": product.get("manufacturer"),
-                    "category": product.get("class", {}).get("name") if "class" in product else None,
+                    "modelNumber": product.get("modelNumber"),
+                    "category": product["class"]["name"] if isinstance(product.get("class"), dict) else product.get("class"),
                     "regularPrice": product.get("regularPrice"),
                     "salePrice": product.get("salePrice"),
-                    "url": product.get("url")
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
-        # update progress
-        progress_bar.progress((i + 1) / len(skus))
-        time.sleep(0.2)  # prevent rate limiting
+    return pd.DataFrame(all_products)
 
-    # ✅ Add timestamp column to results
-    if results:
-        df = pd.DataFrame(results)
-        df["data_pull_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        return df
-
-    return pd.DataFrame()
 
 
 def fetch_products_by_keyword(keyword):
