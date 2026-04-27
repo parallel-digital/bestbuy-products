@@ -4,36 +4,65 @@ import pandas as pd
 import time
 import re
 import datetime
+from urllib.parse import quote
+from typing import Optional
 
 st.set_page_config(page_title="Best Buy Product Explorer", layout="wide")
 
-# Read API key from Streamlit Secrets (Settings → Secrets)
+# Read API key from Streamlit Secrets (Settings -> Secrets)
 API_KEY = st.secrets["BESTBUY_API_KEY"]
 BASE_URL = "https://api.bestbuy.com/v1"
+MAX_PAGE_SIZE = 100
+
+SHOW_FIELDS = ",".join([
+    "sku", "name", "manufacturer", "modelNumber",
+    "salePrice", "regularPrice", "onSale",
+    "url", "image", "categoryPath",
+    "customerReviewAverage", "customerReviewCount"
+])
 
 # ------------------------
 # Helpers
 # ------------------------
-def normalize_sku_input(sku_text: str) -> list[str]:
+
+def normalize_sku_input(sku_text: str):
     """
-    Accepts SKUs separated by newlines, tabs, spaces, or commas (works with Excel paste).
-    Returns a clean list of SKU strings.
+    Accepts SKUs separated by newlines, tabs, spaces, or commas.
+    Returns (valid_skus list, invalid_tokens list).
     """
     if not sku_text:
-        return []
-    skus = re.split(r"[,\s]+", sku_text.strip())
-    cleaned = [s.strip().strip('"').strip("'") for s in skus if s.strip().strip('"').strip("'")]
+        return [], []
+
+    tokens = re.split(r"[,\s]+", sku_text.strip())
+
+    cleaned = []
+    invalid = []
+
+    for t in tokens:
+        if not t:
+            continue
+        t = t.strip().strip('"').strip("'")
+        digits = re.sub(r"\D", "", t)
+        if digits:
+            cleaned.append(digits)
+        elif t:
+            invalid.append(t)
+
+    # Deduplicate while preserving order
     seen = set()
     out = []
     for s in cleaned:
         if s not in seen:
             seen.add(s)
             out.append(s)
-    return out
 
-def extract_category(product: dict) -> str | None:
+    return out, invalid
+
+
+def extract_category(product: dict) -> Optional[str]:
     """
-    Tries to get a friendly category name from categoryPath list.
+    Tries to get a friendly category name.
+    Prefers the last element of categoryPath; falls back to class or department.
     """
     cat_path = product.get("categoryPath") or []
     if isinstance(cat_path, list) and cat_path:
@@ -42,196 +71,161 @@ def extract_category(product: dict) -> str | None:
             name = last.get("name")
             if name:
                 return name
-    cls = product.get("class")
-    if isinstance(cls, dict):
-        if cls.get("name"):
-            return cls.get("name")
-    elif isinstance(cls, str):
-        return cls
-    return product.get("department")
+    return product.get("class") or product.get("department")
 
-def safe_get_products(url: str, params: dict, retries: int = 3, backoff: float = 1.5):
-    """GET with basic retry/backoff for 403/429."""
+
+def safe_get(url: str, params: dict, retries: int = 3, backoff: float = 1.5, timeout: int = 20):
+    """
+    GET with retry/backoff for 403/429. Returns parsed JSON dict or None.
+    Always uses params= dict so requests handles encoding; never manually concatenates apiKey.
+    """
     for attempt in range(retries):
-        resp = requests.get(url, params=params)
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+        except Exception as e:
+            st.error(f"Request exception: {e}")
+            return None
+
         if resp.status_code == 200:
             return resp.json()
+
         if resp.status_code in (403, 429):
             time.sleep(backoff * (attempt + 1))
             continue
-        st.error(f"Error {resp.status_code}: {resp.text}")
+
+        st.error(f"API error {resp.status_code}: {resp.text[:600]}")
         return None
-    st.warning("Rate limit persisted after retries; partial results shown.")
+
+    st.warning("Rate limit persisted after retries; partial results may be shown.")
     return None
 
-def fetch_live_prices(sku_list: list[str]) -> dict:
+
+def products_to_df(products: list, run_ts: str) -> pd.DataFrame:
     """
-    Fetches real-time pricing using Best Buy's internal pricing API — the same
-    source the website uses. This captures active promos that the v1 API's
-    salePrice/onSale fields frequently miss due to caching lag.
-
-    Returns a dict keyed by SKU string with keys:
-        currentPrice, regularPrice, dollarSavings, percentSavings, onSale, priceEventType
-    """
-    prices = {}
-    if not sku_list:
-        return prices
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json",
-        "Referer": "https://www.bestbuy.com/",
-    }
-
-    # Best Buy's pricing endpoint — chunk to ~20 SKUs per request
-    chunk_size = 20
-    for i in range(0, len(sku_list), chunk_size):
-        chunk = sku_list[i : i + chunk_size]
-        skus_param = "%2C".join(str(s) for s in chunk)  # URL-encoded commas
-        url = (
-            "https://www.bestbuy.com/api/tcfb/model.json"
-            f"?paths=%5B%5B%22shop%22%2C%22magellan%22%2C%22v2%22%2C%22page%22%2C%22tenants%22%2C%22bby%22%2C%22skus%22%2C%5B{skus_param}%5D%2C%22prices%22%5D%5D"
-            "&method=get"
-        )
-        try:
-            resp = requests.get(url, headers=headers, timeout=12)
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            skus_data = (
-                data.get("jsonGraph", {})
-                    .get("shop", {})
-                    .get("magellan", {})
-                    .get("v2", {})
-                    .get("page", {})
-                    .get("tenants", {})
-                    .get("bby", {})
-                    .get("skus", {})
-            )
-            for sku in chunk:
-                sku_str = str(sku)
-                pricing = skus_data.get(sku_str, {}).get("prices", {}).get("value", {})
-                if not pricing:
-                    continue
-                current = pricing.get("currentPrice") or pricing.get("customerPrice")
-                regular = pricing.get("regularPrice")
-                if current is None:
-                    continue
-                dollar_savings = round(regular - current, 2) if (regular and current < regular) else 0.0
-                pct_savings = round(dollar_savings / regular * 100, 1) if (regular and dollar_savings > 0) else 0.0
-                event_type = pricing.get("priceEventType", "regular")
-                prices[sku_str] = {
-                    "currentPrice": current,
-                    "regularPrice_live": regular,
-                    "dollarSavings": dollar_savings,
-                    "percentSavings": pct_savings,
-                    "onSale": dollar_savings > 0,
-                    "priceEventType": event_type,
-                }
-        except Exception:
-            pass
-        time.sleep(0.2)
-
-    return prices
-
-def build_rows(products: list, live_prices: dict) -> list:
-    """
-    Merge v1 API product fields with live pricing data.
-    currentPrice from the live endpoint is used as the authoritative price.
+    Convert a list of Best Buy product dicts into a DataFrame with consistent pricing columns.
     """
     rows = []
-    for product in products:
-        sku = str(product.get("sku", ""))
-        live = live_prices.get(sku, {})
+    for p in products or []:
+        sale = p.get("salePrice")
+        regular = p.get("regularPrice")
+        on_sale = p.get("onSale")
 
-        # Prefer live current price; fall back to v1 salePrice
-        current_price = live.get("currentPrice", product.get("salePrice"))
-        regular_price = live.get("regularPrice_live") or product.get("regularPrice")
-        dollar_savings = live.get("dollarSavings", product.get("dollarSavings"))
-        pct_savings = live.get("percentSavings", product.get("percentSavings"))
-        on_sale = live.get("onSale", product.get("onSale"))
-        price_event = live.get("priceEventType", "")
+        savings = None
+        pct_off = None
+        if sale is not None and regular is not None and regular > 0 and sale <= regular:
+            savings = round(regular - sale, 2)
+            pct_off = round((regular - sale) / regular, 4)
 
         rows.append({
-            "sku": sku,
-            "name": product.get("name"),
-            "brand": product.get("manufacturer"),
-            "modelNumber": product.get("modelNumber"),
-            "category": extract_category(product),
-            "regularPrice": regular_price,
-            "currentPrice": current_price,
-            "dollarSavings": dollar_savings if dollar_savings else None,
-            "percentSavings": pct_savings if pct_savings else None,
+            "run_timestamp": run_ts,
+            "sku": p.get("sku"),
+            "name": p.get("name"),
+            "category": extract_category(p),
+            "manufacturer": p.get("manufacturer"),
+            "modelNumber": p.get("modelNumber"),
+            "url": p.get("url"),
+            "image": p.get("image"),
+            "salePrice": sale,
+            "regularPrice": regular,
             "onSale": on_sale,
-            "priceEventType": price_event if price_event and price_event != "regular" else None,
-            "onlineAvailability": product.get("onlineAvailability"),
-            "url": product.get("url"),
+            "savings": savings,
+            "pctOff": pct_off,
+            "customerReviewAverage": p.get("customerReviewAverage"),
+            "customerReviewCount": p.get("customerReviewCount"),
         })
-    return rows
 
-def fetch_products_by_skus(sku_list: list[str]) -> pd.DataFrame:
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_batch(skus_tuple: tuple) -> list:
     """
-    Fetch up to 100 SKUs per request via v1 API, then enrich with live pricing.
+    Cached fetch for a single batch of SKUs (tuple used as cache key).
+    URL-encodes the space in 'sku in(...)' so the API can parse it correctly.
+    """
+    sku_filter = f"(sku in({','.join(skus_tuple)}))"
+    # URL-encode the space in 'sku in' -> 'sku%20in'; keep (),= unencoded
+    encoded_filter = quote(sku_filter, safe="(),=")
+    url = f"{BASE_URL}/products{encoded_filter}.json"
+
+    params = {
+        "apiKey": API_KEY,
+        "show": SHOW_FIELDS,
+        "pageSize": MAX_PAGE_SIZE,
+    }
+
+    data = safe_get(url, params=params)
+    if not data:
+        return []
+    return data.get("products", [])
+
+
+def fetch_products_by_skus(sku_list: list) -> pd.DataFrame:
+    """
+    Fetch SKUs in batches of 100 using the sku in(...) filter.
+    Returns a DataFrame including rows for SKUs not found by the API.
     """
     if not sku_list:
         return pd.DataFrame()
 
     run_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     all_products = []
-    chunk_size = 100
-    progress = st.progress(0)
-    total_chunks = (len(sku_list) + chunk_size - 1) // chunk_size
 
-    for idx in range(0, len(sku_list), chunk_size):
-        chunk = sku_list[idx : idx + chunk_size]
-        skus_joined = ",".join(chunk)
-        url = f"{BASE_URL}/products(sku in({skus_joined}))"
-        params = {
-            "apiKey": API_KEY,
-            "format": "json",
-            "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onSale,dollarSavings,percentSavings,onlineAvailability,categoryPath,url",
-            "pageSize": 100,
-        }
-        data = safe_get_products(url, params)
-        if data and isinstance(data, dict):
-            all_products.extend(data.get("products", []))
-        progress.progress(min((idx // chunk_size + 1) / total_chunks, 1.0))
+    total_chunks = (len(sku_list) + MAX_PAGE_SIZE - 1) // MAX_PAGE_SIZE
+    progress = st.progress(0)
+
+    for i, start in enumerate(range(0, len(sku_list), MAX_PAGE_SIZE)):
+        batch = tuple(sku_list[start:start + MAX_PAGE_SIZE])
+        all_products.extend(fetch_batch(batch))
+        progress.progress(min((i + 1) / total_chunks, 1.0))
         time.sleep(0.3)
 
-    if not all_products:
-        return pd.DataFrame()
+    df = products_to_df(all_products, run_ts)
 
-    # Fetch live prices for all retrieved SKUs
-    fetched_skus = [str(p.get("sku", "")) for p in all_products]
-    live_prices = fetch_live_prices(fetched_skus)
-
-    rows = build_rows(all_products, live_prices)
-    df = pd.DataFrame(rows)
+    # Add placeholder rows for SKUs not returned by API
     if not df.empty:
-        df["data_pull_time"] = run_ts
+        found = set(df["sku"].astype(str).tolist())
+    else:
+        found = set()
+
+    missing = [s for s in sku_list if s not in found]
+    if missing:
+        missing_rows = pd.DataFrame([{
+            "run_timestamp": run_ts,
+            "sku": s,
+            "name": None, "category": None, "manufacturer": None,
+            "modelNumber": None, "url": None, "image": None,
+            "salePrice": None, "regularPrice": None, "onSale": None,
+            "savings": None, "pctOff": None,
+            "customerReviewAverage": None, "customerReviewCount": None,
+            "note": "SKU not returned by API"
+        } for s in missing])
+        df = pd.concat([df, missing_rows], ignore_index=True)
+
     return df
+
 
 def fetch_products_by_keyword(keyword: str) -> pd.DataFrame:
+    """
+    Search Best Buy products by keyword (up to 100 results).
+    """
     if not keyword:
         return pd.DataFrame()
-    run_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    url = f"{BASE_URL}/products((search={keyword}))"
+    run_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    encoded_kw = quote(keyword, safe="")
+    url = f"{BASE_URL}/products(search={encoded_kw}).json"
+
     params = {
         "apiKey": API_KEY,
-        "format": "json",
-        "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onSale,dollarSavings,percentSavings,onlineAvailability,categoryPath,url",
+        "show": SHOW_FIELDS,
         "pageSize": 100,
         "page": 1,
     }
 
     all_products = []
     while True:
-        data = safe_get_products(url, params)
+        data = safe_get(url, params=params)
         if not data:
             break
         products = data.get("products", [])
@@ -241,34 +235,29 @@ def fetch_products_by_keyword(keyword: str) -> pd.DataFrame:
         params["page"] += 1
         time.sleep(0.3)
 
-    if not all_products:
-        return pd.DataFrame()
+    return products_to_df(all_products, run_ts)
 
-    fetched_skus = [str(p.get("sku", "")) for p in all_products]
-    live_prices = fetch_live_prices(fetched_skus)
-    rows = build_rows(all_products, live_prices)
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df["data_pull_time"] = run_ts
-    return df
 
 def fetch_products_by_category(category_id: str) -> pd.DataFrame:
+    """
+    Browse Best Buy products by category ID (up to 100 results per page).
+    """
     if not category_id:
         return pd.DataFrame()
-    run_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    url = f"{BASE_URL}/products(categoryPath.id={category_id})"
+    run_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    url = f"{BASE_URL}/products(categoryPath.id={category_id}).json"
+
     params = {
         "apiKey": API_KEY,
-        "format": "json",
-        "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onSale,dollarSavings,percentSavings,onlineAvailability,categoryPath,url",
+        "show": SHOW_FIELDS,
         "pageSize": 100,
         "page": 1,
     }
 
     all_products = []
     while True:
-        data = safe_get_products(url, params)
+        data = safe_get(url, params=params)
         if not data:
             break
         products = data.get("products", [])
@@ -278,24 +267,23 @@ def fetch_products_by_category(category_id: str) -> pd.DataFrame:
         params["page"] += 1
         time.sleep(0.3)
 
-    if not all_products:
-        return pd.DataFrame()
+    return products_to_df(all_products, run_ts)
 
-    fetched_skus = [str(p.get("sku", "")) for p in all_products]
-    live_prices = fetch_live_prices(fetched_skus)
-    rows = build_rows(all_products, live_prices)
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df["data_pull_time"] = run_ts
-    return df
 
 # ------------------------
 # UI
 # ------------------------
+
 st.title("Best Buy Product Explorer")
 
 mode = st.sidebar.radio("Choose an input method:", ("SKU List", "Keyword Search", "Category Browse"))
+debug = st.sidebar.checkbox("Debug mode (show raw price fields)", value=False)
 
+if st.sidebar.button("Clear cache"):
+    st.cache_data.clear()
+    st.sidebar.success("Cache cleared.")
+
+# ---- SKU List ----
 if mode == "SKU List":
     st.subheader("Search by SKU list")
     sku_input = st.text_area(
@@ -303,17 +291,32 @@ if mode == "SKU List":
         height=180,
         placeholder="6401728\n6535962\n6510256"
     )
+
     if st.button("Fetch by SKUs"):
-        skus = normalize_sku_input(sku_input)
+        skus, invalid = normalize_sku_input(sku_input)
+
+        if invalid:
+            st.info(f"Ignored {len(invalid)} invalid token(s): {invalid[:10]}{'...' if len(invalid) > 10 else ''}")
+
         if not skus:
-            st.warning("Please paste at least one SKU.")
+            st.warning("Please paste at least one valid numeric SKU.")
         else:
+            st.caption(f"Fetching {len(skus)} unique SKU(s)...")
             df = fetch_products_by_skus(skus)
+
             if df.empty:
                 st.warning("No products found.")
             else:
-                st.success(f"Found {len(df)} products.")
-                st.dataframe(df, use_container_width=True)
+                st.success(f"Returned {len(df)} row(s).")
+
+                if debug:
+                    debug_cols = ["sku", "salePrice", "regularPrice", "onSale", "savings", "pctOff"]
+                    if "note" in df.columns:
+                        debug_cols.append("note")
+                    st.dataframe(df[debug_cols], use_container_width=True)
+                else:
+                    st.dataframe(df, use_container_width=True)
+
                 st.download_button(
                     "Download CSV",
                     df.to_csv(index=False),
@@ -321,18 +324,21 @@ if mode == "SKU List":
                     "text/csv"
                 )
 
+# ---- Keyword Search ----
 elif mode == "Keyword Search":
     st.subheader("Search by keyword")
     keyword = st.text_input("Keyword")
+
     if st.button("Search"):
         if not keyword:
             st.warning("Please enter a keyword.")
         else:
-            df = fetch_products_by_keyword(keyword)
+            with st.spinner("Searching..."):
+                df = fetch_products_by_keyword(keyword)
             if df.empty:
                 st.warning("No products found.")
             else:
-                st.success(f"Found {len(df)} products.")
+                st.success(f"Found {len(df)} product(s).")
                 st.dataframe(df, use_container_width=True)
                 st.download_button(
                     "Download CSV",
@@ -341,18 +347,21 @@ elif mode == "Keyword Search":
                     "text/csv"
                 )
 
+# ---- Category Browse ----
 elif mode == "Category Browse":
     st.subheader("Browse by Category ID")
     category_id = st.text_input("Category ID (e.g., abcat0502000)")
+
     if st.button("Browse Category"):
         if not category_id:
             st.warning("Please enter a category ID.")
         else:
-            df = fetch_products_by_category(category_id)
+            with st.spinner("Browsing..."):
+                df = fetch_products_by_category(category_id)
             if df.empty:
                 st.warning("No products found.")
             else:
-                st.success(f"Found {len(df)} products.")
+                st.success(f"Found {len(df)} product(s).")
                 st.dataframe(df, use_container_width=True)
                 st.download_button(
                     "Download CSV",
@@ -360,7 +369,6 @@ elif mode == "Category Browse":
                     "products.csv",
                     "text/csv"
                 )
-
 
 # Custom CSS
 st.markdown(
@@ -387,11 +395,6 @@ st.markdown(
     div.stDownloadButton > button:hover {
         background-color: #f49f0a;
         color: white;
-    }
-    div[data-testid="stDataFrame"] div.row_heading,
-    div[data-testid="stDataFrame"] div.column_heading,
-    div[data-testid="stDataFrame"] div.dataframe td {
-        background-color: #ffffff !important;
     }
     </style>
     """,
