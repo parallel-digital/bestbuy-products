@@ -99,8 +99,7 @@ def fetch_products_by_skus(sku_list: list[str]) -> pd.DataFrame:
         params = {
             "apiKey": API_KEY,
             "format": "json",
-            # Only ask for attributes allowed by Best Buy API
-            "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onlineAvailability,categoryPath.name,url",
+            "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onSale,dollarSavings,percentSavings,onlineAvailability,categoryPath,url",
             "pageSize": 100,
         }
 
@@ -115,6 +114,9 @@ def fetch_products_by_skus(sku_list: list[str]) -> pd.DataFrame:
                     "category": extract_category(product),
                     "regularPrice": product.get("regularPrice"),
                     "salePrice": product.get("salePrice"),
+                    "onSale": product.get("onSale"),
+                    "dollarSavings": product.get("dollarSavings"),
+                    "percentSavings": product.get("percentSavings"),
                     "onlineAvailability": product.get("onlineAvailability"),
                     "url": product.get("url"),
                 })
@@ -136,7 +138,7 @@ def fetch_products_by_keyword(keyword: str) -> pd.DataFrame:
     params = {
         "apiKey": API_KEY,
         "format": "json",
-        "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onlineAvailability,categoryPath.name,url",
+        "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onSale,dollarSavings,percentSavings,onlineAvailability,categoryPath,url",
         "pageSize": 100,
         "page": 1,
     }
@@ -156,10 +158,12 @@ def fetch_products_by_keyword(keyword: str) -> pd.DataFrame:
                 "category": extract_category(product),
                 "regularPrice": product.get("regularPrice"),
                 "salePrice": product.get("salePrice"),
+                "onSale": product.get("onSale"),
+                "dollarSavings": product.get("dollarSavings"),
+                "percentSavings": product.get("percentSavings"),
                 "onlineAvailability": product.get("onlineAvailability"),
                 "url": product.get("url"),
             })
-        # Stop if fewer than pageSize returned (no more pages)
         if len(products) < params["pageSize"]:
             break
         params["page"] += 1
@@ -179,7 +183,7 @@ def fetch_products_by_category(category_id: str) -> pd.DataFrame:
     params = {
         "apiKey": API_KEY,
         "format": "json",
-        "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onlineAvailability,categoryPath.name,url",
+        "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onSale,dollarSavings,percentSavings,onlineAvailability,categoryPath,url",
         "pageSize": 100,
         "page": 1,
     }
@@ -199,6 +203,9 @@ def fetch_products_by_category(category_id: str) -> pd.DataFrame:
                 "category": extract_category(product),
                 "regularPrice": product.get("regularPrice"),
                 "salePrice": product.get("salePrice"),
+                "onSale": product.get("onSale"),
+                "dollarSavings": product.get("dollarSavings"),
+                "percentSavings": product.get("percentSavings"),
                 "onlineAvailability": product.get("onlineAvailability"),
                 "url": product.get("url"),
             })
@@ -324,5 +331,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-    
