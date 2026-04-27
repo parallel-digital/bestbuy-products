@@ -142,7 +142,7 @@ def fetch_products_batch_by_skus(skus: tuple[str, ...]) -> list[dict]:
     """
     Cached fetch for a single SKU batch (tuple for cache key stability).
     """
-    sku_filter = f"(sku in({','.join(skus)}))"
+    sku_filter = f"(sku%20in({','.join(skus)}))"   # encode the space
     url = f"{BASE_URL}/products{sku_filter}.json"
 
     params = {
