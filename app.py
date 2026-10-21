@@ -116,15 +116,16 @@ def fetch_products_by_skus(sku_list: list[str]) -> pd.DataFrame:
         df["data_pull_time"] = run_ts
     return df
 
-def fetch_deep_products_by_skus(sku_list: list[str]) -> list[dict]:
+def fetch_deep_products_by_skus(sku_list: list[str]) -> pd.DataFrame:
     """
-    Fetch comprehensive raw product dictionaries including rich attributes 
-    like descriptions, reviews, images, UPC, and dimensions.
+    Fetch comprehensive product rows including rich attributes 
+    like descriptions, reviews, UPC, and dimensions, returned as a DataFrame.
     """
     if not sku_list:
-        return []
+        return pd.DataFrame()
 
-    all_products = []
+    run_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    all_rows = []
     chunk_size = 50  # Smaller chunk size for heavy attribute payloads
     progress = st.progress(0)
     total_chunks = (len(sku_list) + chunk_size - 1) // chunk_size
@@ -134,13 +135,12 @@ def fetch_deep_products_by_skus(sku_list: list[str]) -> list[dict]:
         skus_joined = ",".join(chunk)
         url = f"{BASE_URL}/products(sku in({skus_joined}))"
         
-        # Expanded list of attributes available from Best Buy API
         rich_attributes = (
             "sku,name,modelNumber,manufacturer,regularPrice,salePrice,"
             "onlineAvailability,categoryPath.name,url,longDescription,"
             "shortDescription,customerReviewAverage,customerReviewCount,"
             "upc,weight,shippingWeight,condition,warrantyLabor,warrantyParts,"
-            "images,features,includedItemList"
+            "features,includedItemList"
         )
         
         params = {
@@ -152,12 +152,33 @@ def fetch_deep_products_by_skus(sku_list: list[str]) -> list[dict]:
 
         data = safe_get_products(url, params)
         if data and isinstance(data, dict):
-            all_products.extend(data.get("products", []))
+            for product in data.get("products", []):
+                all_rows.append({
+                    "sku": product.get("sku"),
+                    "name": product.get("name"),
+                    "brand": product.get("manufacturer"),
+                    "modelNumber": product.get("modelNumber"),
+                    "upc": product.get("upc"),
+                    "category": extract_category(product),
+                    "regularPrice": product.get("regularPrice"),
+                    "salePrice": product.get("salePrice"),
+                    "onlineAvailability": product.get("onlineAvailability"),
+                    "condition": product.get("condition"),
+                    "customerReviewAverage": product.get("customerReviewAverage"),
+                    "customerReviewCount": product.get("customerReviewCount"),
+                    "weight": product.get("weight"),
+                    "shippingWeight": product.get("shippingWeight"),
+                    "longDescription": product.get("longDescription"),
+                    "url": product.get("url"),
+                })
 
         progress.progress(min((idx // chunk_size + 1) / total_chunks, 1.0))
         time.sleep(0.3)
 
-    return all_products
+    df = pd.DataFrame(all_rows)
+    if not df.empty:
+        df["data_pull_time"] = run_ts
+    return df
 
 def fetch_products_by_keyword(keyword: str) -> pd.DataFrame:
     if not keyword:
@@ -290,45 +311,18 @@ elif mode == "Deep SKU Inspector":
         if not skus:
             st.warning("Please paste at least one SKU.")
         else:
-            products_list = fetch_deep_products_by_skus(skus)
-            if not products_list:
+            df = fetch_deep_products_by_skus(skus)
+            if df.empty:
                 st.warning("No products found.")
             else:
-                st.success(f"Successfully retrieved deep data for {len(products_list)} products.")
-                
-                # Render each product in a rich expanded card view
-                for p in products_list:
-                    with st.container(border=True):
-                        col1, col2 = st.columns([1, 3])
-                        
-                        with col1:
-                            images = p.get("images", [])
-                            primary_img = ""
-                            if isinstance(images, list) and images:
-                                primary_img = images[0].get("href", "")
-                            elif isinstance(images, dict):
-                                primary_img = images.get("href", "")
-                                
-                            if primary_img:
-                                st.image(primary_img, use_container_width=True)
-                            else:
-                                st.info("No Image Available")
-                                
-                        with col2:
-                            st.markdown(f"### {p.get('name', 'N/A')}")
-                            st.caption(f"**Brand:** {p.get('manufacturer', 'N/A')} | **Model:** {p.get('modelNumber', 'N/A')} | **SKU:** {p.get('sku', 'N/A')} | **UPC:** {p.get('upc', 'N/A')}")
-                            
-                            p_col1, p_col2, p_col3, p_col4 = st.columns(4)
-                            p_col1.metric("Regular Price", f"${p.get('regularPrice', 'N/A')}")
-                            p_col2.metric("Sale Price", f"${p.get('salePrice', 'N/A')}")
-                            p_col3.metric("Rating", f"{p.get('customerReviewAverage', 'N/A')} ⭐")
-                            p_col4.metric("Reviews", f"{p.get('customerReviewCount', 'N/A')}")
-                            
-                            with st.expander("Product Description & Details"):
-                                st.write(f"**Long Description:** {p.get('longDescription', 'N/A')}")
-                                st.write(f"**Condition:** {p.get('condition', 'N/A')} | **Weight:** {p.get('weight', 'N/A')} lbs")
-                                if p.get('url'):
-                                    st.markdown(f"[View on Best Buy Website]({p.get('url')})", unsafe_allow_html=True)
+                st.success(f"Successfully retrieved deep data for {len(df)} products.")
+                st.dataframe(df, use_container_width=True)
+                st.download_button(
+                    "Download CSV",
+                    df.to_csv(index=False),
+                    "deep_products_comprehensive.csv",
+                    "text/csv"
+                )
 
 elif mode == "Keyword Search":
     st.subheader("Search by keyword")
