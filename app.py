@@ -53,6 +53,13 @@ def extract_category(product: dict) -> str | None:
 
     return product.get("department")
 
+def extract_image_url(product: dict) -> str | None:
+    """
+    Returns the best available Best Buy product image.
+    Prefers largeImage and falls back to image.
+    """
+    return product.get("largeImage") or product.get("image")
+    
 def safe_get_products(url: str, params: dict, retries: int = 3, backoff: float = 1.5):
     """
     GET with basic retry/backoff for 403/429.
@@ -89,7 +96,7 @@ def fetch_products_by_skus(sku_list: list[str]) -> pd.DataFrame:
         params = {
             "apiKey": API_KEY,
             "format": "json",
-            "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onlineAvailability,categoryPath.name,url",
+            "show": "sku,name,modelNumber,manufacturer,regularPrice,salePrice,onlineAvailability,categoryPath.name,url,image,largeImage",
             "pageSize": 100,
         }
 
@@ -106,6 +113,7 @@ def fetch_products_by_skus(sku_list: list[str]) -> pd.DataFrame:
                     "salePrice": product.get("salePrice"),
                     "onlineAvailability": product.get("onlineAvailability"),
                     "url": product.get("url"),
+                    "imageUrl": extract_image_url(product),
                 })
 
         progress.progress(min((idx // chunk_size + 1) / total_chunks, 1.0))
